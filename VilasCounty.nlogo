@@ -1,5 +1,7 @@
 extensions [matrix]
-globals [numberDefPatches lessCommon listDbg currGraphPatch RecomputeBA total-harvest]
+globals [numberDefPatches lessCommon listDbg currGraphPatch RecomputeBA total-harvest bug-kcal bug-smr]
+breed[birds bird]
+birds-own [bugsEaten bird-energy SMR]
 patches-own [
   patchNum row col landcov2001 canopy2001 houses1996 houses2005 frontage 
   lakesize road_length soil ownership zoning tree-size diam-dist distribution-type basal-area
@@ -22,7 +24,7 @@ to setup
   initialize-forests
   if (RecomputeBA) [ ask patches with [tree-size > 0] [recompute-basal-area] ]
   recolor-patches
-  ask patches [set r 0.2 set Pt 0 set k 5 
+  ask patches [set r 0.2 set Pt 1 set k 5 
     if landcov2001 = 24 [set k 1] ;;high intensity developed
     if landcov2001 = 23 [set k 2] ;;medium developed
     if landcov2001 = 22 or landcov2001 = 12[set k 3] ;;developed low intensity or perennial ice/snow
@@ -31,8 +33,15 @@ to setup
     if landcov2001 = 51 or landcov2001 = 52 [set k 4.5] ;;shrub
     if landcov2001 >= 71 and landcov2001 <= 82 [set k 7.5] ;;crops and herbacious
     if landcov2001 >= 90 [set k 2.0] ;;woody wetlands and emergent herbaceous wetlands
-    set bugs-amt 60
+    ifelse (landcov2001 != 11 and landcov2001 != 255) [set bugs-amt 60 set Pt 2]
+    [set Pt 0]
   ]
+  create-birds start-birds [move-to one-of patches set size 3.5 set bird-energy 50 set SMR 14.5]
+  set bug-kcal 6
+  set bug-smr 6
+  ;set pt-kcal 900
+
+
   set currGraphPatch one-of patches with [tree-size > 0]
   update-plot
 end
@@ -40,13 +49,13 @@ end
 to step
   set listDbg 0
   recolor-patches
-  tree-growth
+  ;tree-growth
   go
 end
 
 to go
   
-  if (ticks > 0 and ticks mod 365 = 0) [
+  if (ticks > 0 and ticks mod 365 = 70) [
     tree-growth
   ]
   ask patches[
@@ -56,7 +65,10 @@ to go
   if (ticks mod recolor-interval = 0) [recolor-patches]
   update-plot
   
+  ask birds [birds-step]
+  
   ifelse(stopticks)[  ] [tick]
+  
   
   
 end
@@ -329,6 +341,19 @@ to recolor-patches
     color-monetary-value 
   ]
   
+  if patchColoring = "bugs" [
+   color-bugs 
+  ]
+  
+end
+
+to color-bugs
+  let max-bugs [bugs-amt] of max-one-of patches [bugs-amt]
+  ask patches [
+    ifelse (bugs-amt = 0) [ set pcolor black ] [
+      set pcolor scale-color red bugs-amt max-bugs 1
+    ]
+  ]
 end
 
 to color-forest-type
@@ -352,6 +377,14 @@ to color-forest-type
         ]
       ]
     ] 
+  ]
+end
+
+to color-monetary-value
+  let max-val [monetary-value] of max-one-of patches [monetary-value]
+  let min-val [monetary-value] of min-one-of (patches with [monetary-value > 0]) [monetary-value]
+  ask patches [
+    ifelse (tree-size = 0) [ set pcolor black ] [set pcolor scale-color green monetary-value max-val min-val]
   ]
 end
 
@@ -409,7 +442,8 @@ to color-land-coverage
 end
 
 to color-canopy-size
-  
+  ask patches with [tree-size > 0] [set pcolor scale-color green canopy2001 100 0]
+  ask patches with [tree-size = 0] [set pcolor black]
 end
 
 to color-mean-tree-size
@@ -450,10 +484,10 @@ end
 to color-vegitation
   ask patches[
     ifelse (Pt = 0) [ set pcolor black ] [
-      let temp-pt (Pt / 7)
-      if (temp-pt > .8 ) [set temp-pt .8]
-      if (temp-pt < .15 ) [set temp-pt .15]
-      set pcolor (50 + (10 * (1 - temp-pt)))
+     ; let temp-pt (Pt / 7)
+      ;if (temp-pt > .8 ) [set temp-pt .8]
+      ;if (temp-pt < .15 ) [set temp-pt .15]
+      set pcolor scale-color green Pt 4 0
     ]
   ]
 end
@@ -528,10 +562,12 @@ end
 
 to-report ingrowth [growPatch]
   let category [landcov2001] of growPatch
-  ifelse (category = 41) [report 18.187 - .097 * [basal-area] of growPatch ] [
-    ifelse (category = 42) [report 7.622 - .059 * [basal-area] of growPatch ] [
-      report 4.603 - .035 * [basal-area] of growPatch
+  let ret-val 0
+  ifelse (category = 41) [set ret-val 18.187 - .097 * [basal-area] of growPatch ] [
+    ifelse (category = 42) [set ret-val 7.622 - .059 * [basal-area] of growPatch ] [
+      set ret-val 4.603 - .035 * [basal-area] of growPatch
     ]]
+  report ret-val
 end
 
 to create-growth-matrix
@@ -575,24 +611,61 @@ to recompute-basal-area
 end
 
 to herbaceous-vegetation
-  if (ticks mod 365) = 1 [
-    set Pt (Pt + 1) 
+  
+  ifelse energetics [
+    ;if (ticks mod 365) = 1 [
+     ; set Pt (2) 
+    ;]
+    if (ticks mod 365) < 175[ ;;ticks mod 365 
+      set Pt (2 + r * Pt * (1 - (Pt / K))) 
+    ]
+    
+    if (ticks mod 365) >= 175 [
+      set Pt (2 - (r / 2) * Pt) 
+    ]
+    ;set Pt (Pt + dP)
   ]
-  if (ticks mod 365) < 175[ ;;ticks mod 365 
-    set dP (r * Pt - (bugs-amt * bugs-eating-rate * Pt)) 
-
+  [
+    if (ticks mod 365) = 1 [
+      set Pt (Pt + 1) 
+    ]
+    if (ticks mod 365) < 175[ ;;ticks mod 365 
+      set dP (r * Pt * (1 - (Pt / K)) - (bugs-amt * (bugs-eating-rate / 1000))) 
+    ]
+    
+    if (ticks mod 365) >= 175 [
+      set dP (-(r / 2) * Pt) - (bugs-amt * bugs-eating-rate * Pt) ]
+    set Pt (Pt + dP)
   ]
-  if (ticks mod 365) >= 175 [
-    set dP (-(r / 2) * Pt) - (bugs-amt * bugs-eating-rate * Pt) ]
-  set Pt (Pt + dP)
+  
+  
+  if tree-herb-interact [set Pt Pt * ((k * (1 - e ^ (-0.34 * canopy2001)) ^ .5) / k)]
   
   if (Pt < 0) [set Pt 0]
+  
 end
 
 to bugs-step
-
-  set bugs-amt ((bugs-amt * ( bugs-eating-rate / 10 )  * Pt) - (bugs-amt * (1 / bug-death-rate)))
-  if (bugs-amt < 0) [ set bugs-amt 0 ]
+  ifelse energetics [
+    let old-amt bugs-amt
+    ifelse ((bugs-amt * bug-kcal) < (pt-kcal * .1 * Pt)) [
+      if (ticks mod 20 = 0) [
+        set bugs-amt (bugs-amt + ((pt-kcal * .1 * Pt) / (2 * bug-kcal)))
+      ]
+      set Pt (Pt - (((Pt * pt-kcal * .1) - (bugs-amt * bug-kcal)) / pt-kcal))
+    ]
+    [
+      set bugs-amt (bugs-amt * bug-kcal - pt-kcal * .1 * Pt) / bug-kcal
+      set Pt 0
+    ]
+  ]
+  [
+    set bugs-amt ((bugs-amt * ( bugs-eating-rate / 10 )  * Pt) - (bugs-amt * (1 / bug-death-rate)))
+  ]
+  
+ ; if (Pt < 0) [set Pt 0]
+  ;if (bugs-amt <= 0) [ set bugs-amt 1 ]
+  
   
 end
 
@@ -613,6 +686,27 @@ to update-plot
 
   set-current-plot "Harvest Value per Year"
   plot harvest-per-year
+  
+  set-current-plot "Energy on Patch"
+  if (Energy-bar-or-line) [clear-plot]
+  set-current-plot-pen "plant-energy"
+  ifelse (Energy-bar-or-line) [set-plot-pen-mode 1] [set-plot-pen-mode 0]
+  let plant-en ([Pt] of currGraphPatch * [pt-kcal] of currGraphPatch)
+   ifelse (Energy-bar-or-line) [plotxy 0 plant-en * .01] [plot plant-en * .01]
+  set-current-plot-pen "bug-energy"
+  ifelse (Energy-bar-or-line) [set-plot-pen-mode 1] [set-plot-pen-mode 0]
+  ifelse (Energy-bar-or-line) [plotxy 1 ([bugs-amt] of currGraphPatch) * .1] [plot ([bugs-amt] of currGraphPatch) * .1]
+  if any? birds-on currGraphPatch [
+    let tempen 0
+    foreach sort birds-on currGraphPatch [
+     set tempen tempen + [bird-energy] of ? 
+    ]
+    set-current-plot-pen "bird-energy"
+   ifelse (Energy-bar-or-line) [set-plot-pen-mode 1] [set-plot-pen-mode 0]  
+    
+    ifelse (Energy-bar-or-line) [plotxy 2 tempen] [plot tempen]
+  ]
+   
   
 end
 
@@ -685,14 +779,6 @@ to calc-monetary-value
     ifelse (landcov2001 = 42) [set monetary-value ((12 * poletimber-cords) + (151 * sawtimber-Mbf))  ] [
         set monetary-value ((13 * poletimber-cords) + (127 * sawtimber-Mbf)) 
     ]]
-end
-
-to color-monetary-value
-  let max-val [monetary-value] of max-one-of patches [monetary-value]
-  let min-val [monetary-value] of min-one-of (patches with [monetary-value > 0]) [monetary-value]
-  ask patches [
-    ifelse (tree-size = 0) [ set pcolor black ] [set pcolor scale-color green monetary-value max-val min-val]
-  ]
 end
 
 to-report scribner-conversion [vol diameter isHardwood]
@@ -837,15 +923,54 @@ to-report harvest-per-year
     report total-harvest
   ]
 end
+
+to birds-step
+  
+  rt (random 100) - 50
+  fd 1
+  let bugs-eaten-this-tick 0
+  
+  ifelse ([bugs-amt] of patch-here >= bugs-eaten-per-tick) [
+    set bugs-eaten-this-tick bugs-eaten-per-tick
+  ]
+  [
+    set bugs-eaten-this-tick bugs-amt
+  ]
+  set bugsEaten bugsEaten + bugs-eaten-this-tick
+    
+  ask patch-here [ if bugs-amt > 0 
+    [set bugs-amt bugs-amt - bugs-eaten-per-tick] ]
+  
+  if(bird-labels) [ set label round bugsEaten ]
+  
+  if(bird-reprod) [ 
+    set bird-energy bird-energy - SMR
+    ifelse (bird-energy <= 0) [ die ]
+    [
+      set bird-energy bird-energy + ( bugs-eaten-this-tick)
+      if bird-energy >= (birds-energy-to-reproduce * SMR) [
+        set bird-energy (bird-energy / 2)
+        hatch 1 [set bugs-amt 0]
+      ]
+    ]
+  ]
+  
+end
+  
+  
+  
+  
+  
+  
 @#$#@#$#@
 GRAPHICS-WINDOW
-353
+357
 10
-817
-495
+849
+523
 50
 50
-4.5
+4.7723
 1
 10
 1
@@ -919,14 +1044,14 @@ CHOOSER
 246
 patchColoring
 patchColoring
-"land coverage" "canopy size" "forest type" "mean tree size" "basal area" "herbacious vegitation" "monetary value"
-0
+"land coverage" "canopy size" "forest type" "mean tree size" "basal area" "herbacious vegitation" "monetary value" "bugs"
+7
 
 INPUTBOX
-16
-360
-261
-420
+1
+369
+246
+429
 input-file
 vilasChunk.txt
 1
@@ -942,7 +1067,7 @@ recolor-interval
 recolor-interval
 1
 5000
-1
+26
 1
 1
 NIL
@@ -1005,7 +1130,7 @@ CHOOSER
 harvest-type
 harvest-type
 "clear cut" "diameter limit" "Arbogast"
-0
+2
 
 BUTTON
 225
@@ -1043,7 +1168,7 @@ arbogast-B
 arbogast-B
 60
 140
-60
+69
 1
 1
 NIL
@@ -1091,10 +1216,10 @@ stopticks
 -1000
 
 BUTTON
-862
-65
-965
-98
+1057
+28
+1160
+61
 auto harvest
 auto-harvest
 T
@@ -1107,10 +1232,10 @@ NIL
 NIL
 
 SLIDER
-842
-111
-1014
-144
+1037
+74
+1209
+107
 harvest-frequency
 harvest-frequency
 1
@@ -1122,10 +1247,10 @@ NIL
 HORIZONTAL
 
 SWITCH
-982
-67
-1137
-100
+1177
+30
+1332
+63
 area-or-dispersed
 area-or-dispersed
 1
@@ -1133,10 +1258,10 @@ area-or-dispersed
 -1000
 
 SLIDER
-844
-151
-1016
-184
+1039
+114
+1211
+147
 patches-to-harvest
 patches-to-harvest
 1
@@ -1148,10 +1273,10 @@ NIL
 HORIZONTAL
 
 MONITOR
-846
-210
-950
-255
+1041
+173
+1145
+218
 total harvest ($)
 total-harvest
 17
@@ -1159,10 +1284,10 @@ total-harvest
 11
 
 PLOT
-848
-271
-1048
-421
+1056
+235
+1256
+385
 Harvest Value per Year
 NIL
 NIL
@@ -1176,10 +1301,10 @@ PENS
 "default" 1.0 0 -16777216 true
 
 MONITOR
-965
-213
-1074
-258
+1160
+176
+1269
+221
 NIL
 harvest-per-year
 17
@@ -1188,14 +1313,14 @@ harvest-per-year
 
 SLIDER
 6
-251
+248
 178
-284
+281
 bugs-eating-rate
 bugs-eating-rate
 1
 100
-4
+6
 1
 1
 NIL
@@ -1203,9 +1328,9 @@ HORIZONTAL
 
 SLIDER
 6
-316
+283
 178
-349
+316
 bug-death-rate
 bug-death-rate
 1
@@ -1215,6 +1340,140 @@ bug-death-rate
 1
 NIL
 HORIZONTAL
+
+SLIDER
+181
+278
+353
+311
+start-birds
+start-birds
+1
+100
+100
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+180
+316
+352
+349
+bugs-eaten-per-tick
+bugs-eaten-per-tick
+0
+100
+80
+1
+1
+NIL
+HORIZONTAL
+
+SWITCH
+248
+369
+349
+402
+bird-labels
+bird-labels
+1
+1
+-1000
+
+SWITCH
+248
+405
+352
+438
+bird-reprod
+bird-reprod
+1
+1
+-1000
+
+SWITCH
+1061
+397
+1217
+430
+tree-herb-interact
+tree-herb-interact
+0
+1
+-1000
+
+SLIDER
+6
+319
+177
+352
+birds-energy-to-reproduce
+birds-energy-to-reproduce
+2
+100
+20
+1
+1
+NIL
+HORIZONTAL
+
+SWITCH
+1061
+440
+1208
+473
+energetics
+energetics
+0
+1
+-1000
+
+SLIDER
+861
+114
+1033
+147
+pt-kcal
+pt-kcal
+100
+10000
+10000
+10
+1
+NIL
+HORIZONTAL
+
+PLOT
+851
+235
+1051
+385
+Energy on Patch
+NIL
+Energy
+0.0
+10.0
+0.0
+10.0
+true
+false
+PENS
+"plant-energy" 1.0 1 -10899396 true
+"bird-energy" 1.0 1 -16777216 true
+"bug-energy" 1.0 1 -2674135 true
+
+SWITCH
+871
+403
+1028
+436
+Energy-bar-or-line
+Energy-bar-or-line
+0
+1
+-1000
 
 @#$#@#$#@
 WHAT IS IT?
